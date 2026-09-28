@@ -1,0 +1,11 @@
+# normalize line endings: profile patches and YAML must not drift on CRLF
+* text=auto eol=lf
+
+# binaries
+*.jpg binary
+*.png binary
+*.webp binary
+*.ico binary
+
+# svg as text keeps diffs readable
+*.svg text eol=lf

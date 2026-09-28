@@ -1,0 +1,59 @@
+{
+  "name": "@local/dsh-install-review",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Audit a catalog plugin, approve the change plan, apply it, then install.",
+  "license": "MIT",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "plugin-review",
+    "security-audit",
+    "pre-install"
+  ],
+  "homepage": "https://github.com/GIN0076/dsh-install-review#readme",
+  "bugs": {
+    "url": "https://github.com/GIN0076/dsh-install-review/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GIN0076/dsh-install-review.git"
+  },
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "host-v6.js",
+    "audit-v3.js",
+    "catalog.js",
+    "catalog-view.js",
+    "patch-audit.js",
+    "proposals.js",
+    "runner-v4.js",
+    "semver-lite.js",
+    "client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  }
+}

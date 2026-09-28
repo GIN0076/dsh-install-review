@@ -1,0 +1,20 @@
+# dependencies & caches
+node_modules/
+.cache/
+
+# dev scratch (machine-specific probes, staging screenshots)
+_shots/
+_selftest-*/
+review-*
+catalog-probe.mjs
+semver-probe*.mjs
+fetch-readmes.mjs
+probe-client.mjs
+*.out.txt
+*.log
+_rpc_err.txt
+_tmp*
+
+# os noise
+Thumbs.db
+.DS_Store

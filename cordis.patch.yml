@@ -1,0 +1,7 @@
+# 审查（install-review）：审查 → 方案审批 → 改动 → 安装；「清单」浏览页 + 覆盖检查 + 构建脚本批准
+# 注意：行 name 指向 Host 半的**带版本号**文件（相对 patch 的路径）——Node ESM 按 URL
+# 缓存模块，改 Host 代码必须换文件名（host-v6.js …）再 remove+install，或整体重启 dsh web。
+- insert:
+    - id: install-review
+      name: './host-v6.js'
+      config: {}

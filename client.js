@@ -35,6 +35,8 @@ window.__ModuleLoader__.load({
       blockingTitle: '存在阻断项，安装按钮已禁用',
       suggestionsTitle: '改进建议（仅建议，不自动执行）',
       proposalsTitle: '改动方案（勾选才会执行）',
+      selectAll: '全选',
+      selectNone: '全不选',
       noProposals: '没有可批准的改动；直接执行即按原样安装。',
       execute: '批准并执行',
       executing: '执行中…',
@@ -104,6 +106,8 @@ window.__ModuleLoader__.load({
       blockingTitle: 'Blocking findings — install is disabled',
       suggestionsTitle: 'Suggestions (advisory only)',
       proposalsTitle: 'Change proposals (ticked ones run)',
+      selectAll: 'Select all',
+      selectNone: 'Clear all',
       noProposals: 'Nothing to approve; executing installs as-is.',
       execute: 'Approve & run',
       executing: 'Running…',
@@ -300,6 +304,10 @@ window.__ModuleLoader__.load({
           return line.ok
             ? { tone: 'ok', text: `✓ 已备份 ${line.files.join('、')} → ${line.dir}` }
             : { tone: 'error', text: `✗ 备份失败：${line.error}` }
+        case 'exemption':
+          return line.ok
+            ? { tone: 'ok', text: `✓ ${line.message ?? (line.enabled === false ? '已撤销版本豁免' : '已授予版本豁免')}` }
+            : { tone: 'error', text: `✗ 版本豁免失败：${line.error ?? ''}` }
         case 'config':
           return line.ok
             ? { tone: 'ok', text: `✓ 配置写入 ${line.id}（${line.phase === 'after' ? '安装后' : '安装前'}）` }
@@ -324,11 +332,19 @@ window.__ModuleLoader__.load({
         case 'build-approval':
           if (line.approved === true) return { tone: 'ok', text: `✓ ${line.message}` }
           return { tone: line.retry ? 'warn' : 'error', text: `⚠ ${line.message}` }
-        case 'verify':
+        case 'verify': {
+          const notes = Array.isArray(line.notes) ? line.notes : []
           return {
-            tone: line.duplicates?.length > 0 ? 'error' : 'ok',
-            text: `${line.duplicates?.length > 0 ? '✗' : '✓'} profile ${line.installed ? '已写入' : '未写入'}${line.spec ? `（${line.spec}）` : ''}；重复 loader id：${line.duplicates?.length > 0 ? line.duplicates.join(', ') : '无'}`,
+            tone: line.duplicates?.length > 0 || notes.length > 0 ? 'warn' : 'ok',
+            text: `${line.duplicates?.length > 0 ? '✗' : '✓'} profile ${line.installed ? '已写入' : '未写入'}${line.spec ? `（${line.spec}）` : ''}；重复 loader id：${line.duplicates?.length > 0 ? line.duplicates.join(', ') : '无'}${notes.length > 0 ? `\n· 生效核验：${notes.join('\n· ')}` : '\n· 生效核验：行已激活'}${line.restartRequired ? '\n· 需要重启 dsh 才生效' : ''}`,
           }
+        }
+        case 'rows':
+          return line.skipped
+            ? { tone: 'muted', text: `· 行启用：${line.message}` }
+            : line.ok
+              ? { tone: 'ok', text: `✓ 行启用：${line.message ?? (line.enabled ?? []).join('、')}` }
+              : { tone: 'error', text: `✗ 行启用失败：${line.error ?? ''}` }
         case 'done':
           return { tone: line.succeeded ? 'ok' : 'error', text: `${line.succeeded ? '✓ 完成' : '✗ 未完成'}（${line.application}）` }
         case 'error':
@@ -494,6 +510,14 @@ window.__ModuleLoader__.load({
       const [agentTasks, setAgentTasks] = useState([])
       /** Inline error for the import box — kept next to the button, not at the page top. */
       const [amendError, setAmendError] = useState(null)
+      /** Blocking checks the user acknowledged (only `overridable` ones can be). */
+      const [acked, setAcked] = useState({})
+      /** Risk acknowledgement per proposal (`proposal.acknowledge`) — human-only gate. */
+      const [ackRisk, setAckRisk] = useState({})
+      /** Set when an install failed on the registry: offers the one-click source retry. */
+      const [pendingRegistry, setPendingRegistry] = useState(false)
+      /** What a bulk select/clear deliberately left alone, said out loud. */
+      const [bulkNote, setBulkNote] = useState(null)
       const alive = useRef(true)
       const pollRef = useRef(null)
       const debounceRef = useRef(null)
@@ -507,7 +531,18 @@ window.__ModuleLoader__.load({
       const busyExecuting = phase === 'executing'
       const busy = busyAuditing || busyExecuting
       const blocking = (report?.checks ?? []).filter(item => item.status === 'block')
-      const canExecute = !busy && report !== null && blocking.length === 0
+      /**
+       * A block stops the run unless it is (a) acknowledged, which only checks
+       * that set `overridable: true` allow — the host never enforces `engines`,
+       * (b) resolved by a ticked proposal (`resolves`, e.g. the exemption grant
+       * for a peer mismatch), or (c) an already-exempted peer.
+       */
+      const resolvedByChosen = new Set(proposals.filter(proposal => approved[proposal.id] === true).flatMap(proposal => proposal.resolves ?? []))
+      const unresolved = blocking.filter(item => !resolvedByChosen.has(item.id) && !(item.overridable === true && acked[item.id] === true))
+      /** A ticked proposal that still owes its human risk acknowledgement. */
+      const unackedRisk = proposals.filter(proposal =>
+        approved[proposal.id] === true && proposal.acknowledge !== undefined && ackRisk[proposal.id] !== true)
+      const canExecute = !busy && report !== null && unresolved.length === 0 && unackedRisk.length === 0
 
       async function startAudit(explicit) {
         const rawTarget = String(explicit ?? target).trim()
@@ -517,6 +552,9 @@ window.__ModuleLoader__.load({
         setError(null)
         setReport(null)
         setProposals([])
+        setApproved({})
+        setAcked({})
+        setAckRisk({})
         setLogs([])
         setFinalLine(null)
         try {
@@ -546,10 +584,21 @@ window.__ModuleLoader__.load({
         setLogs([])
         setFinalLine(null)
         setPendingBuilds([])
+        setPendingRegistry(false)
         try {
           const stream = streamLines('dsh-install-review/execute', {
             rawTarget: target.trim(),
-            approved: proposals.filter(proposal => approved[proposal.id] === true).map(proposal => proposal.id),
+            approved: [
+              ...proposals.filter(proposal => approved[proposal.id] === true).map(proposal => proposal.id),
+              // The one-click retry mints its own approval without a visible tick.
+              ...(Array.isArray(extra?.extraApproved) ? extra.extraApproved : []),
+            ],
+            acknowledged: [
+              ...Object.keys(acked).filter(id => acked[id] === true),
+              // `risk:<id>` is minted only by the human tick in this panel, so an
+              // imported revision cannot grant a risk-bearing remedy on its own.
+              ...Object.keys(ackRisk).filter(id => ackRisk[id] === true).map(id => `risk:${id}`),
+            ],
             values,
             ...(approvedBuilds.length > 0 ? { approvedBuilds } : {}),
           })
@@ -559,6 +608,12 @@ window.__ModuleLoader__.load({
             if (line.step === 'build-approval' && line.retry === false && line.approved !== true
               && Array.isArray(line.pendingBuilds) && line.pendingBuilds.length > 0) {
               setPendingBuilds(line.pendingBuilds)
+            }
+            // A registry-shaped failure is the one case where "try another source"
+            // is an actionable, one-click next step.
+            if (line.step === 'install-result' && line.application === 'failed'
+              && (line.failedAt === 'registry' || line.error?.code === 'network' || line.error?.code === 'not-found')) {
+              setPendingRegistry(true)
             }
             if (line.step === 'done' || line.step === 'error') setFinalLine(line)
             if (line.step === 'done' && line.succeeded === true) setPendingBuilds([])
@@ -749,6 +804,43 @@ window.__ModuleLoader__.load({
         setApproved(previous => ({ ...previous, [proposalId]: checked }))
       }
 
+      /**
+       * Tick or untick everything a human may tick, in one click.
+       *
+       * Two kinds are deliberately left alone — and both are said out loud
+       * instead of being skipped silently: a proposal that still owes its risk
+       * acknowledgement (only a human tick does that), and the install-source
+       * lever (`bulkSkip`: it fixes a download failure, it is not a plan item,
+       * and selecting it would re-point the source).
+       * @param on - true selects, false clears.
+       */
+      function toggleAll(on) {
+        const next = { ...approved }
+        let gated = 0
+        let skipped = 0
+        for (const proposal of proposals) {
+          if (on && proposal.acknowledge !== undefined && ackRisk[proposal.id] !== true) {
+            gated += 1
+            next[proposal.id] = false
+            continue
+          }
+          if (on && proposal.bulkSkip === true) {
+            skipped += 1
+            next[proposal.id] = false
+            continue
+          }
+          next[proposal.id] = on
+        }
+        setApproved(next)
+        const notes = on
+          ? [
+            gated > 0 ? `有 ${gated} 条要先勾「接受风险」，全选没有替你勾` : '',
+            skipped > 0 ? '「换个安装源」没有替你勾（它是下载失败时的补救，不是常规选项）' : '',
+          ].filter(text => text !== '')
+          : []
+        setBulkNote(notes.length === 0 ? null : notes.join('；'))
+      }
+
       function editValue(proposalId, key, value) {
         setValues(previous => ({ ...previous, [proposalId]: { ...(previous[proposalId] ?? {}), [key]: value } }))
       }
@@ -782,7 +874,27 @@ window.__ModuleLoader__.load({
 
           blocking.length === 0 ? null : h('div', { style: { ...token.card, borderColor: 'var(--dsw-alias-state-error-primary)' } },
             h('div', { style: { ...token.text, color: 'var(--dsw-alias-state-error-primary)', fontWeight: 600 } }, t('blockingTitle')),
-            ...blocking.map(item => h('div', { key: item.id, style: { ...token.muted, marginTop: 4 } }, `· ${item.title}：${mask(item.detail ?? '')}`))),
+            h('div', { style: token.muted },
+              unresolved.length === 0
+                ? '阻断项已按你的选择放行，可以执行了。'
+                : `还有 ${unresolved.length} 项没处理：勾选下面的确认，或在方案里勾选对应的放行办法。`),
+            ...blocking.map(item => unresolved.includes(item)
+              ? h('div', { key: item.id, style: { ...token.muted, marginTop: 6 } },
+                `· ${mask(item.title)}：${mask(item.detail ?? '')}`,
+                item.overridable === true
+                  ? h('label', { style: { display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 4, cursor: 'pointer' } },
+                    h('input', {
+                      type: 'checkbox',
+                      checked: acked[item.id] === true,
+                      onChange: event => setAcked(previous => ({ ...previous, [item.id]: event.target.checked })),
+                      style: { marginTop: 3, flexShrink: 0 },
+                    }),
+                    h('span', null, item.ackLabel ?? '我确认仍然继续'))
+                  : h('span', { style: { display: 'block', marginTop: 4, color: 'var(--dsw-alias-state-warn-primary)' } },
+                    '这一项不能靠确认跳过，只能用官方通道放行：请在方案里勾选「放行版本检查」。'))
+              : h('div', { key: item.id, style: { ...token.muted, marginTop: 4 } },
+                `· ${mask(item.title)}：${mask(item.detail ?? '')}`,
+                h('span', { style: { color: 'var(--dsw-alias-state-ok-primary)' } }, '（已放行）')))),
 
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
             ...report.checks.map((item) => {
@@ -800,19 +912,50 @@ window.__ModuleLoader__.load({
             ...report.suggestions.map((text, index) => h('div', { key: index, style: token.muted }, `· ${text}`)))),
 
         h('div', { key: 'proposals', style: { display: 'flex', flexDirection: 'column', gap: 6 } },
-          h('div', { style: { ...token.text, fontWeight: 600 } }, t('proposalsTitle')),
+          h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+            h('div', { style: { ...token.text, fontWeight: 600 } }, t('proposalsTitle')),
+            proposals.length === 0 ? null : h('button', {
+              type: 'button',
+              onClick: () => toggleAll(true),
+              style: buttonStyle(false, false),
+            }, t('selectAll')),
+            proposals.length === 0 ? null : h('button', {
+              type: 'button',
+              onClick: () => toggleAll(false),
+              style: buttonStyle(false, false),
+            }, t('selectNone'))),
+          bulkNote === null ? null : h('div', { style: token.muted }, bulkNote),
           proposals.length === 0 ? h('div', { style: token.muted }, t('noProposals')) : null,
           ...proposals.map(proposal => h('label', { key: proposal.id, style: { ...token.card, display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' } },
             h('input', {
               type: 'checkbox',
               checked: approved[proposal.id] === true,
+              disabled: proposal.acknowledge !== undefined && ackRisk[proposal.id] !== true,
               onChange: event => toggle(proposal.id, event.target.checked),
-              style: { marginTop: 3, flexShrink: 0 },
+              style: { marginTop: 3, flexShrink: 0, ...(proposal.acknowledge === undefined || ackRisk[proposal.id] === true ? {} : { opacity: 0.45 }) },
             }),
             h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 } },
               h('div', { style: { ...token.text, fontWeight: 600 } }, proposal.title),
               proposal.detail ? h('div', { style: token.muted }, proposal.detail) : null,
               proposal.risk ? h('div', { style: { ...token.muted, color: 'var(--dsw-alias-state-warn-primary)' } }, `风险：${proposal.risk}`) : null,
+              proposal.acknowledge === undefined ? null : h('label', { style: { display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 6, cursor: 'pointer', color: 'var(--dsw-alias-state-warn-primary)' } },
+                h('input', {
+                  type: 'checkbox',
+                  checked: ackRisk[proposal.id] === true,
+                  // Nested in the card's label: stop the click so it cannot also
+                  // toggle the proposal's own box.
+                  onClick: event => event.stopPropagation(),
+                  onChange: event => {
+                    const on = event.target.checked
+                    setAckRisk(previous => ({ ...previous, [proposal.id]: on }))
+                    if (!on) toggle(proposal.id, false)
+                  },
+                  style: { marginTop: 3, flexShrink: 0 },
+                }),
+                h('span', null, proposal.acknowledge.label)),
+              proposal.acknowledge === undefined || ackRisk[proposal.id] === true
+                ? null
+                : h('div', { style: { ...token.muted, fontStyle: 'italic' } }, '先勾上面的风险确认，才能勾选这条方案（这一步只能由你本人做）。'),
               ...(proposal.editable ?? []).map(field => h('div', { key: field.key, style: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 } },
                 h('div', { style: token.muted }, field.label),
                 field.multiline === true
@@ -823,12 +966,19 @@ window.__ModuleLoader__.load({
                     spellCheck: false,
                     style: { ...token.field, ...token.mono, width: '100%', resize: 'vertical' },
                   })
-                  : h('input', {
-                    value: values[proposal.id]?.[field.key] ?? '',
-                    onChange: event => editValue(proposal.id, field.key, event.target.value),
-                    spellCheck: false,
-                    style: { ...token.field, ...token.mono, width: '100%' },
-                  })))))),
+                  : Array.isArray(field.options)
+                    ? h('select', {
+                      value: values[proposal.id]?.[field.key] ?? field.value ?? '',
+                      onChange: event => editValue(proposal.id, field.key, event.target.value),
+                      'aria-label': field.label,
+                      style: { ...token.field, width: '100%' },
+                    }, ...field.options.map(option => h('option', { key: option, value: option }, option)))
+                    : h('input', {
+                      value: values[proposal.id]?.[field.key] ?? '',
+                      onChange: event => editValue(proposal.id, field.key, event.target.value),
+                      spellCheck: false,
+                      style: { ...token.field, ...token.mono, width: '100%' },
+                    })))))),
 
         report === null ? null : h('div', { key: 'suggestion', style: { display: 'flex', flexDirection: 'column', gap: 6 } },
           h('div', { style: { ...token.text, fontWeight: 600 } }, t('yourSuggestion')),
@@ -889,6 +1039,14 @@ window.__ModuleLoader__.load({
               onClick: () => void runExecution({ approvedBuilds: pendingBuilds }),
               style: buttonStyle(true, busy),
             }, fill(t('approveBuildsRetry'), pendingBuilds.join('、')))
+            : null,
+          pendingRegistry && proposals.some(proposal => proposal.kind === 'registry')
+            ? h('button', {
+              type: 'button',
+              disabled: busy,
+              onClick: () => void runExecution({ extraApproved: ['registry'] }),
+              style: buttonStyle(true, busy),
+            }, `换源重试（用 ${values.registry?.registry ?? '上面选的源'}）`)
             : null,
           report === null ? null : h('span', { style: token.muted }, blocking.length > 0 ? t('blockingTitle') : (busyExecuting ? '安装进行中，请勿关闭页面' : '执行会先备份 profile，再按批准的方案改动并安装'))),
 

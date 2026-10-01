@@ -1,6 +1,6 @@
 # 审查（install-review）：审查 → 方案审批 → 改动 → 安装；「清单」浏览页 + 覆盖检查 + 构建脚本批准
 # 注意：行 name 指向 Host 半的**带版本号**文件（相对 patch 的路径）——Node ESM 按 URL
-# 缓存模块，改 Host 代码必须换文件名（host-v6.js → host-v8.js …）再 remove+install，
+# 缓存模块，改 Host 代码必须换文件名（host-v6.js → host-v10.js …）再 remove+install，
 # 或整体重启 dsh（桌面版＝重启 DeepSeek Harness.exe）。
 #
 # v7（已废弃，未发行）：桌面/打包版的槽口目录改为读打包进
@@ -10,7 +10,12 @@
 # 在桌面版必然失败（面板报「清单加载失败 / 同源校验失败」）。v8 改为先问宿主自己的
 # `connection.requestRejection`（与 @deepseek-ai/dsh-host-open-in-app 同一条官方通道），
 # 本机 Origin 检查只作兜底。
+# v9：阻断项不再死路——peer 不兼容可勾选「放行版本检查」（官方 setVersionExemption，
+# 只对那一对确切版本生效、可撤销）；engines 不符仍锁住但明说宿主不拦、可由用户确认后继续。
+# v10：能力优化三件事——「换源重试」（installBundle 的 registry 参数）、「配置模板自动填好」
+# （来自它自己的 patch config 默认值 + profile 现值）、「打开它声明但没启用的行」
+# （setPluginEnabled/setBundleEnabled）＋「有新版就更新保配置」＋装完核验激活状态。
 - insert:
     - id: install-review
-      name: './host-v8.js'
+      name: './host-v10.js'
       config: {}

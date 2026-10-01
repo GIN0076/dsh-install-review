@@ -140,15 +140,21 @@ dsh plugin --profile web add github:GIN0076/dsh-install-review
 - Restart `dsh web`, then hard-refresh (Ctrl+Shift+R) → Settings → **插件装前审查 / Pre-install Review**
 
 **Desktop (packaged app, measured on 0.2.0-rc.2)**: Settings → Plugins → **Add plugin** with the
-local directory path (or `install_bundle` from the plugin-manager tooling), then restart DeepSeek
-Harness. Two things differ from a browser hitting the Host directly, and v1.1.0 handles both:
-① the runtime lives inside `resources/app.asar` and ships **no `src/` tree**, so the slot audit reads
-the **compiled** catalog (`…/dsh-cordis-client-runner/lib/client.js`);
-② the window's origin is `dsh-app://app` and its protocol handler **deletes `Origin` / `Sec-Fetch-Site`
-/ `Cookie`** before forwarding, then injects the Host's own session cookie → the panel no longer
-compares Origin itself but asks the Host's `connection.requestRejection` (the same channel the
-official `@deepseek-ai/dsh-host-open-in-app` uses; no cookie → 401, cross-site Origin → 403, and the
-refusal now carries a `hint` plus the headers it saw). The host half advanced to `host-v8.js`.
+local directory path (or `install_bundle` from the plugin-manager tooling).
+
+- **There is no "reload page" in the packaged Desktop app**: that menu item (and DevTools) exists only
+  in development builds (`!app.isPackaged`) — so do not hunt for Ctrl+Shift+R. A changed **client half
+  (the UI) usually hot-swaps by itself**; to force the new bundle, **quit and reopen
+  `DeepSeek Harness.exe`** (sessions are durable — pick the conversation up from the sidebar). A changed
+  **host half (the logic) needs no restart**: `remove_bundle` + `install_bundle` reloads it.
+- Two things differ from a browser hitting the Host directly, both handled since v1.1.0:
+  ① the runtime lives inside `resources/app.asar` and ships **no `src/` tree**, so the slot audit reads
+  the **compiled** catalog (`…/dsh-cordis-client-runner/lib/client.js`);
+  ② the window's origin is `dsh-app://app` and its protocol handler **deletes `Origin` / `Sec-Fetch-Site`
+  / `Cookie`** before forwarding, then injects the Host's own session cookie → the panel no longer
+  compares Origin itself but asks the Host's `connection.requestRejection` (the same channel the
+  official `@deepseek-ai/dsh-host-open-in-app` uses; no cookie → 401, cross-site Origin → 403, and the
+  refusal carries a `hint` plus the headers it saw).
 
 > Prefer not to use git? Copy the repository locally and point the plugin manager's
 `install_bundle` at the directory, then complete the same two profile configuration steps.

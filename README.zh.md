@@ -103,14 +103,19 @@ dsh plugin --profile web add github:GIN0076/dsh-install-review
 - 把 `@local/dsh-install-review` 加入 profile 的 `dsh.profile.bundles`，并在 `cordis.patch.yml` 加入它的 insert 行；只执行上面的 `add` 命令只会把仓库放进 `node_modules`，**不会挂载界面**
 - 装完重启 `dsh web`，再**硬刷新**（Ctrl+Shift+R）→ 设置 → **插件装前审查**
 
-**桌面版（打包 App，实测 0.2.0-rc.2）**：设置 → 插件 → **添加插件**，填本地目录路径（或插件管理工具 `install_bundle` 指向目录）；
-装完重启 DeepSeek Harness 即可。桌面版有两处和浏览器直连不同，v1.1.0 都已适配：
-① 运行时在 `resources/app.asar` 内、**没有 `src/` 源码树** → 槽口核对改读**编译版目录**
-（`…/dsh-cordis-client-runner/lib/client.js`）；
-② 窗口 origin 是 `dsh-app://app`，其协议处理器转发前会**删掉 `Origin` / `Sec-Fetch-Site` / `Cookie`**
-再注入 Host 自己的会话 cookie → 面板请求不再自比 Origin，而是问宿主自己的
-`connection.requestRejection`（与官方 `@deepseek-ai/dsh-host-open-in-app` 同一条通道；无 cookie → 401，
-跨站 Origin → 403，并在响应里回带 `hint` + 看到的头部摘要）。Host 半因此换代到 `host-v8.js`。
+**桌面版（打包 App，实测 0.2.0-rc.2）**：设置 → 插件 → **添加插件**，填本地目录路径（或插件管理工具 `install_bundle` 指向目录）。
+
+- **桌面版没有「刷新页面」**：那个菜单项（以及开发者工具）只在开发模式（`!app.isPackaged`）里存在，正式安装里没有——
+  所以别找 Ctrl+Shift+R。**客户端半（界面）改了通常会自己热更新**；要强制加载新版就**退出并重开 `DeepSeek Harness.exe`**
+  （会话是持久化的，重开后在左侧列表里继续打开即可）。**Host 半（逻辑）改了不需要重启**——按下面的换代流程
+  `remove_bundle` + `install_bundle` 就会重新加载。
+- 桌面版有两处和浏览器直连不同，v1.1.0 起已适配：
+  ① 运行时在 `resources/app.asar` 内、**没有 `src/` 源码树** → 槽口核对改读**编译版目录**
+  （`…/dsh-cordis-client-runner/lib/client.js`）；
+  ② 窗口 origin 是 `dsh-app://app`，其协议处理器转发前会**删掉 `Origin` / `Sec-Fetch-Site` / `Cookie`**
+  再注入 Host 自己的会话 cookie → 面板请求不再自比 Origin，而是问宿主自己的
+  `connection.requestRejection`（与官方 `@deepseek-ai/dsh-host-open-in-app` 同一条通道；无 cookie → 401，
+  跨站 Origin → 403，并在响应里回带 `hint` + 看到的头部摘要）。
 
 > 不想走 git？把仓库拷到本地，用插件管理页的 `install_bundle` 指向目录，再完成同样的两处 profile 配置，效果完全一样。
 

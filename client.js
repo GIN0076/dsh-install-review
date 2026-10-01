@@ -221,6 +221,26 @@ window.__ModuleLoader__.load({
       return new URL(String(path).replace(/^\/+/, ''), document.baseURI).pathname
     }
 
+    /**
+     * One line the panel can show for a refusal: the host's `error`, its `hint`,
+     * and the header summary it saw (`seen`) — v8 reports those on 401/403 so a
+     * fence failure explains itself instead of just saying "失败".
+     */
+    function errorNote(status, text) {
+      let parsed
+      try {
+        parsed = JSON.parse(text)
+      } catch {
+        return text.slice(0, 400) || `HTTP ${status}`
+      }
+      const seen = parsed.seen
+      return [
+        parsed.error ?? `HTTP ${status}`,
+        parsed.hint,
+        seen === undefined ? undefined : `看到 Host ${seen.host} / Origin ${seen.origin} / site ${seen.site} / cookie ${seen.cookie}`,
+      ].filter(part => typeof part === 'string' && part !== '').join(' · ')
+    }
+
     async function postJson(path, body) {
       const response = await fetch(apiUrl(path), {
         method: 'POST',
@@ -234,7 +254,7 @@ window.__ModuleLoader__.load({
       } catch {
         throw new Error(text.slice(0, 400) || `HTTP ${response.status}`)
       }
-      if (!response.ok) throw new Error(parsed.error ?? `HTTP ${response.status}`)
+      if (!response.ok) throw new Error(errorNote(response.status, text))
       return parsed
     }
 
@@ -246,7 +266,7 @@ window.__ModuleLoader__.load({
       })
       if (!response.ok || !response.body) {
         const text = await response.text()
-        throw new Error(text.slice(0, 400) || `HTTP ${response.status}`)
+        throw new Error(errorNote(response.status, text))
       }
       const reader = response.body.getReader()
       const decoder = new TextDecoder()

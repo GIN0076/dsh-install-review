@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.1.0 — 2026-10-01
+
+Desktop（打包版）适配。两条桌面版专属问题都来自同一个事实：桌面版**不是浏览器直连 Host**——
+窗口 origin 是 `dsh-app://app`，协议处理器转发前会删掉 `origin` / `sec-fetch-site` / `cookie`
+（`resources/app.asar/lib/main.js` 的 `forwardWebRequest`），并注入 Host 自己的会话 cookie；
+运行时又整个装在 `app.asar` 里、**没有 `src/` 源码树**。
+
+### 修复
+
+- **面板全线 403「同源校验失败」**（用户实测「清单加载失败」）：旧的「Origin 主机 == 请求 Host」
+  围栏在桌面版**必然失败**（Origin 已被删）。现改为先问宿主自己的
+  `connection.requestRejection`——与官方 `@deepseek-ai/dsh-host-open-in-app` 同一条通道：
+  loopback/受信 Host 栅栏 + `sec-fetch-site: cross-site` 拦截 + Origin 一致（有 Origin 时）+
+  浏览器 cookie 认证（无 cookie → 401）。本机 Origin 检查降级为**没有 connection 服务时的兜底**。
+  401/403 响应带回 `hint` 与 `seen`（Host / Origin / site / cookie 有无），面板直接显示，
+  以后围栏再出问题不用猜。
+- 槽口目录改为**候选列表**（`audit-v4.js` 的 `slotCatalogCandidates`）：行配置 `slotCatalogPath` →
+  打包版 `.../@deepseek-ai/dsh-cordis-client-runner/lib/client.js` → profile 自己的 `node_modules` →
+  源码树（沿 installAnchor 向上 ≤7 层找 `slot-catalog.ts`）。
+- 目录解析同时接受单引号与双引号（源码 `key: 'settings.section'`；编译版 `key: "settings.section"`），
+  且只认带点的槽口键——实测打包版编译目录解析出 **77 个槽口键**，旧解析器只认出 3 个（含 Client 服务名）。
+- 主机半换代 `host-v6.js` → **`host-v8.js`**（ESM 按 URL 缓存，改代码必须换文件名）；
+  `cordis.patch.yml` 指向 `./host-v8.js`。（`host-v7.js` 是当天写出、当天即被 v8 取代的**未发行中间态**，
+  不进本版。）`index.js` 只作转发，行名才是活的那份。
+
+### 自测
+
+- 新增 `selftest-host.mjs`（自测的宿主依赖**动态探测**：源码树 / 本目录 / 打包 `app.asar`）＋找不到就
+  `SKIP` 而非 FAIL——旧的 `E:/DSH-OneClick/src/node_modules/.pnpm/...` 硬编码随 source 安装消失，
+  曾让两套自测直接 import 崩溃。
+- `host-selftest` 新增 7 条：桌面版形状请求（无 Origin / 无 sec-fetch-site / 带 Host cookie）必须放行、
+  同一请求去掉 cookie → 401 且带 `hint`/`seen`、`connection` 服务确实被问到、无 connection 时兜底围栏仍拦。
+
+### 未变
+
+- 其余 12 项检查、清单浏览、审批式安装、四文件备份、`client.js` 的结构（仅错误提示更详细）**全部未改**。
+
+### 实测（桌面版 0.2.0-rc.2）
+
+- `install_bundle` 本地 link 安装 `applied` 零警告；五条路由挂载；同源外 Origin → 403；
+  匿名（无 cookie）→ **401**；实审 `dsh-plugin-whale-pet` `block 0 / warn 1（不在精选清单）/ pass 8 / info 3`，
+  `slot-audit pass`（目录＝`app.asar/.../dsh-cordis-client-runner/lib/client.js`）。
+- 七套自测全绿：`semver` 在桌面版 node 下用 `app.asar` 里的 semver 跑出 **1280/1280 全等**。
+
 ## 1.0.0 — 2026-09-29
 
 First public release (consolidates the internal v1 → v6.1 development line).
@@ -34,5 +78,5 @@ First public release (consolidates the internal v1 → v6.1 development line).
 
 ### 质量
 
-- **七套零依赖自测全绿**（`semver-selftest` 1280 例 + 六套 ALL PASS）
+- **七套零依赖自测**（`semver-selftest` 1280 例 + 六套离线用例）；端到端两套读取真实清单，遇到真实的 peer 不兼容会按设计阻断
 - **0 宿主源码改动**；显示名「插件装前审查 / Pre-install Review」，标识符（包名 / id / 路由 / 协议）保持 `install-review`

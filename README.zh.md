@@ -7,7 +7,7 @@
 
 English · 简体中文 · [CHANGELOG](./CHANGELOG.md)
 
-![](https://img.shields.io/badge/DeepSeek%20Harness-0.1.7--rc.2-blue?style=flat-square)
+![](https://img.shields.io/badge/DeepSeek%20Harness-0.2.0--rc.2-blue?style=flat-square)
 ![](https://img.shields.io/badge/检查项-13~14-brightgreen?style=flat-square)
 ![](https://img.shields.io/badge/运行时依赖-0-orange?style=flat-square)
 ![](https://img.shields.io/badge/宿主源码改动-0-red?style=flat-square)
@@ -51,7 +51,7 @@ English · 简体中文 · [CHANGELOG](./CHANGELOG.md)
 | 安装状态 | 已装 / 未装（认得 4 种 loader id 形态） |
 | loader id 撞车 | 与本机全部 loader 行求交集——重复 id 会让宿主启动崩溃，这是用教训换来的检查 |
 | 补丁覆盖行 | 目标 patch 的 override 行：目标存在吗？有没有被别的插件双重改写？（自审不自报） |
-| 槽口核对 | 拿本机 `slot-catalog.ts` 逐个对——**跑不起来就给警告**，无法确认 ≠ 放行 |
+| 槽口核对 | 拿本机槽口目录逐个对：源码装读 `slot-catalog.ts`，**桌面/打包版读编译进 `app.asar` 的 `…/dsh-cordis-client-runner/lib/client.js`**——**跑不起来就给警告**，无法确认 ≠ 放行 |
 | 安装期脚本 | `prepare` / `postinstall` 等 → 自动进入「批准并重试」流程 |
 | 终端类表面 | 描述像 CLI 工具 → 警告「装进 web profile 可能不生效」 |
 | engines | **两种写法都读**：`engines.dsh` 与 `dsh.engines.dsh`（只读其一会误报"未声明"） |
@@ -83,11 +83,21 @@ English · 简体中文 · [CHANGELOG](./CHANGELOG.md)
 dsh plugin --profile web add github:GIN0076/dsh-install-review
 ```
 
-- 要求：DeepSeek Harness **0.1.7-rc.2**（实测版本）+ web profile
+- 要求：DeepSeek Harness **0.2.0-rc.2**（实测版本）+ web profile 或**桌面版**
 - **零运行时依赖**、无构建步骤、无 postinstall
-- 装完**硬刷新**（Ctrl+Shift+R）→ 设置 → **插件装前审查**
+- 把 `@local/dsh-install-review` 加入 profile 的 `dsh.profile.bundles`，并在 `cordis.patch.yml` 加入它的 insert 行；只执行上面的 `add` 命令只会把仓库放进 `node_modules`，**不会挂载界面**
+- 装完重启 `dsh web`，再**硬刷新**（Ctrl+Shift+R）→ 设置 → **插件装前审查**
 
-> 不想走 git？把仓库拷到本地，用插件管理页的 `install_bundle` 指向目录，效果完全一样。
+**桌面版（打包 App，实测 0.2.0-rc.2）**：设置 → 插件 → **添加插件**，填本地目录路径（或插件管理工具 `install_bundle` 指向目录）；
+装完重启 DeepSeek Harness 即可。桌面版有两处和浏览器直连不同，v1.1.0 都已适配：
+① 运行时在 `resources/app.asar` 内、**没有 `src/` 源码树** → 槽口核对改读**编译版目录**
+（`…/dsh-cordis-client-runner/lib/client.js`）；
+② 窗口 origin 是 `dsh-app://app`，其协议处理器转发前会**删掉 `Origin` / `Sec-Fetch-Site` / `Cookie`**
+再注入 Host 自己的会话 cookie → 面板请求不再自比 Origin，而是问宿主自己的
+`connection.requestRejection`（与官方 `@deepseek-ai/dsh-host-open-in-app` 同一条通道；无 cookie → 401，
+跨站 Origin → 403，并在响应里回带 `hint` + 看到的头部摘要）。Host 半因此换代到 `host-v8.js`。
+
+> 不想走 git？把仓库拷到本地，用插件管理页的 `install_bundle` 指向目录，再完成同样的两处 profile 配置，效果完全一样。
 
 ## 卸载
 
@@ -96,18 +106,22 @@ dsh plugin --profile web add github:GIN0076/dsh-install-review
 ## 自检
 
 ```sh
-node semver-selftest.mjs          # 1280 例，与宿主 semver 全等
+node semver-selftest.mjs          # 1280 例，与宿主 semver 全等（找不到宿主 semver 时标 SKIP）
 node catalog-view-selftest.mjs    # 分类/能力/红线/投影
 node patch-audit-selftest.mjs     # override 行解析与判定
 node audit-selftest.mjs           # 解析 / peer / engines 双写法 / 端到端
 node runner-selftest.mjs          # 备份 / 配置 / approvedBuilds / stale-approval
 node host-selftest.mjs            # 路由与同源围栏
-node client-selftest.mjs          # 真实 react-dom SSR + 修订导入闭环
+node client-selftest.mjs          # 修订导入闭环（有 react-dom 时额外做 SSR 渲染）
 ```
 
-**七套全绿，零测试框架、零依赖。**
+**七套自测，零测试框架、零依赖。** 端到端两套会读取真实外网清单：当被测包声明的 peer 不兼容当前 DSH 时，阻断是预期结果，不应把“全绿”当作安装许可。
 
-> 这些自测默认假设 DSH 源码在 `E:/DSH-OneClick`（路径写在各文件顶部的常量里），换台机器改常量即可；测试夹具里的用户名是假的（`localtester`），用来验证「报告里的本机路径一定被打码」。
+> 自测自己找宿主依赖（`selftest-host.mjs`：源码树 / 本目录 / 打包运行时依次探测），**不再硬编码任何安装路径**。
+> 想在桌面版上跑出真正的 1280 例 semver 比对：`$env:ELECTRON_RUN_AS_NODE=1; & "…\DeepSeek Harness.exe" semver-selftest.mjs`
+> ——它会用 `app.asar` 里的 semver。找不到 node-semver / react-dom 时那一段标 `SKIP`（不是 FAIL）；
+> 可用 `DSH_SELFTEST_SEMVER` / `DSH_SELFTEST_REACT` / `DSH_SELFTEST_REACT_DOM` 指定具体文件。
+> 测试夹具里的用户名是假的（`localtester`），用来验证「报告里的本机路径一定被打码」。
 
 ## 免责声明
 

@@ -174,7 +174,7 @@ globalThis.fetch = async (url, init) => {
 
 /* --- helpers --------------------------------------------------------------- */
 /** Positional index of each useState in ReviewPage (hook order is part of the contract). */
-const I = { tab: 0, target: 1, phase: 2, report: 3, proposals: 4, approved: 5, values: 6, logs: 7, error: 8, finalLine: 9, cat: 10, copied: 11, pendingBuilds: 12, suggestion: 13, amendText: 14, amendBadge: 15, agentTasks: 16, amendError: 17 }
+const I = { tab: 0, target: 1, phase: 2, report: 3, proposals: 4, approved: 5, values: 6, logs: 7, error: 8, finalLine: 9, cat: 10, copied: 11, pendingBuilds: 12, suggestion: 13, amendText: 14, amendBadge: 15, agentTasks: 16, amendError: 17, acked: 18, ackRisk: 19, pendingRegistry: 20, bulkNote: 21 }
 const CATALOG_IDLE = {
   state: 'idle', entries: [], categories: [], total: 0, filtered: 0, offset: 0, limit: 25,
   q: '', category: '', sort: 'stars', generatedAt: undefined, source: undefined, stale: false, error: null,
@@ -296,6 +296,34 @@ expect('ready checkbox count', elements(ready).filter(element => element.type ==
 expect('ready textarea count (config + suggestion + amend)', elements(ready).filter(element => element.type === 'textarea').length, 3)
 expect('ready log line', elements(ready).some(element => element.type === 'div' && childText(element) === '✓ 完成'), true)
 expect('ready result banner', elements(ready).some(element => childText(element).includes('完成：dsh-find-plugin')), true)
+
+/* 2b · bulk select ticks everything a human may tick, and says what it left alone */
+{
+  const bulk = render(state({
+    target: 'dsh-find-plugin',
+    phase: 'ready',
+    report: AUDIT_PAYLOAD.report,
+    proposals: [
+      ...AUDIT_PAYLOAD.proposals,
+      { id: 'registry', kind: 'registry', bulkSkip: true, title: '换源', defaultOn: false },
+      { id: 'exemption', kind: 'exemption', acknowledge: { label: '接受风险' }, title: '豁免', defaultOn: false },
+    ],
+    approved: {},
+  }))
+  const selectAll = buttonByLabel(bulk, 'T:selectAll')
+  expect('select-all button rendered', selectAll !== undefined, true)
+  selectAll.props.onClick()
+  expect('select-all ticks the plan items', [current[I.approved].version, current[I.approved]['profile-config']], [true, true])
+  expect('select-all leaves the risk-gated remedy alone', current[I.approved].exemption, false)
+  expect('select-all leaves the source lever alone', current[I.approved].registry, false)
+  const afterAll = render(current)
+  expect('select-all explains the skips', elements(afterAll).some(element => childText(element).includes('接受风险')), true)
+  const selectNone = buttonByLabel(afterAll, 'T:selectNone')
+  expect('select-none button rendered', selectNone !== undefined, true)
+  selectNone.props.onClick()
+  expect('select-none clears everything', current[I.approved], { version: false, 'profile-config': false, registry: false, exemption: false })
+  expect('select-none drops the note', current[I.bulkNote], null)
+}
 
 /* 3 · blocking disables execute */
 const blocked = render(state({

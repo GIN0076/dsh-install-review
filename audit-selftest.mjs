@@ -5,8 +5,8 @@
  */
 import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { parseTarget, insertedIds, registeredSlotKeys, peerCheck, runAudit, readRuntimeVersion, resolveDshEngines, slotKeysFromCatalogText, slotCatalogCandidates } from './audit-v4.js'
-import { buildProposals, blockingChecks } from './proposals.js'
+import { parseTarget, insertedIds, registeredSlotKeys, peerCheck, runAudit, readRuntimeVersion, resolveDshEngines, slotKeysFromCatalogText, slotCatalogCandidates } from './audit-v6.js'
+import { buildProposals, blockingChecks } from './proposals-v3.js'
 
 let failures = 0
 function expect(label, actual, wanted) {

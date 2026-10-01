@@ -1,6 +1,7 @@
 /**
  * Exercise the Host entry: mount routes, then drive the audit route through
- * fake req/res objects (same-origin fence included) without a running Harness.
+ * fake req/res objects — fence included, with and without the composition's
+ * `connection` service (the Desktop shell forwards without Origin/Sec-Fetch-Site).
  */
 import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -17,6 +18,23 @@ await writeFile(join(scratch, 'cordis.patch.yml'), '- id: llm-pi-ai\n  name: "@d
 const routes = []
 const listeners = []
 const cleanups = []
+/**
+ * Faithful mirror of the Host `connection.requestRejection` decision
+ * (`@deepseek-ai/dsh-client-connection`): loopback Host fence, cross-site
+ * rejection, Origin equality when present, then the browser cookie.
+ */
+const connectionCalls = []
+const connection = {
+  requestRejection(request) {
+    connectionCalls.push(request.headers)
+    const host = request.headers.host
+    if (typeof host !== 'string' || host === '') return 403
+    if (request.headers['sec-fetch-site'] === 'cross-site') return 403
+    const origin = request.headers.origin
+    if (origin !== undefined && new URL(origin).host !== host) return 403
+    return typeof request.headers.cookie === 'string' && request.headers.cookie !== '' ? undefined : 401
+  },
+}
 const ctx = {
   profileContext: {
     dir: scratch,
@@ -44,7 +62,7 @@ const ctx = {
     cleanups.push({ label, dispose })
     return () => {}
   },
-  get: () => undefined,
+  get: name => (name === 'connection' ? connection : undefined),
 }
 
 let failures = 0
@@ -126,13 +144,35 @@ expect('install events forwarded', listeners.map(entry => entry.event), ['plugin
 expect('effect labels', cleanups.map(entry => entry.label), ['install-review: routes'])
 
 const byPath = Object.fromEntries(routes.map(route => [route.path, route]))
-const origin = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', 'content-type': 'application/json' }
+const origin = { host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080', cookie: 'dsh-auth-127.0.0.1:3080=stub', 'content-type': 'application/json' }
 
 /* fences */
-const wrongOrigin = await invoke(byPath['/dsh-install-review/audit'], 'POST', { host: '127.0.0.1:3080', origin: 'http://evil.test' }, '{"target":"x"}')
+const wrongOrigin = await invoke(byPath['/dsh-install-review/audit'], 'POST', { host: '127.0.0.1:3080', origin: 'http://evil.test', cookie: origin.cookie }, '{"target":"x"}')
 expect('wrong origin rejected', wrongOrigin.statusCode, 403)
+const crossSite = await invoke(byPath['/dsh-install-review/status'], 'POST', { host: '127.0.0.1:3080', 'sec-fetch-site': 'cross-site', cookie: origin.cookie }, '{}')
+expect('cross-site marker rejected', crossSite.statusCode, 403)
 const wrongMethod = await invoke(byPath['/dsh-install-review/status'], 'GET', origin)
 expect('GET rejected', wrongMethod.statusCode, 405)
+
+/* the Desktop shell forwards WITHOUT origin / sec-fetch-site and injects the Host cookie
+   (resources/app.asar/lib/main.js forwardWebRequest) — the composition must admit it */
+const desktop = await invoke(byPath['/dsh-install-review/status'], 'POST', { host: '127.0.0.1:19387', cookie: origin.cookie, 'content-type': 'application/json' }, '{}')
+expect('desktop-shaped request admitted', [desktop.statusCode, JSON.parse(desktop.text()).active], [200, null])
+expect('connection service consulted', connectionCalls.length > 0, true)
+const anonymous = await invoke(byPath['/dsh-install-review/status'], 'POST', { host: '127.0.0.1:19387', 'content-type': 'application/json' }, '{}')
+expect('anonymous desktop request 401', anonymous.statusCode, 401)
+const refusal = JSON.parse(anonymous.text())
+expect('refusal carries a hint', typeof refusal.hint, 'string')
+expect('refusal carries the header summary', [refusal.seen.host, refusal.seen.origin, refusal.seen.site, refusal.seen.cookie], ['127.0.0.1:19387', '(无)', '(无)', '无'])
+
+/* fallback: a composition without `connection` keeps the local v1–v7 fence */
+const serviceBackup = ctx.get
+ctx.get = () => undefined
+const fallbackHappy = await invoke(byPath['/dsh-install-review/status'], 'POST', origin, '{}')
+expect('fallback accepts matching origin', fallbackHappy.statusCode, 200)
+const fallbackBare = await invoke(byPath['/dsh-install-review/status'], 'POST', { host: '127.0.0.1:3080', 'content-type': 'application/json' }, '{}')
+expect('fallback rejects a request with no browser markers', fallbackBare.statusCode, 403)
+ctx.get = serviceBackup
 
 /* status */
 const status = await invoke(byPath['/dsh-install-review/status'], 'POST', origin, '{}')
@@ -160,7 +200,7 @@ const catalogSecond = await invoke(byPath['/dsh-install-review/catalog'], 'POST'
 expect('catalog second call status', catalogSecond.statusCode, 200)
 
 /* fences apply to the catalog route too */
-const catalogWrongOrigin = await invoke(byPath['/dsh-install-review/catalog'], 'POST', { host: '127.0.0.1:3080', origin: 'http://evil.test' }, '{}')
+const catalogWrongOrigin = await invoke(byPath['/dsh-install-review/catalog'], 'POST', { host: '127.0.0.1:3080', origin: 'http://evil.test', cookie: origin.cookie }, '{}')
 expect('catalog wrong origin rejected', catalogWrongOrigin.statusCode, 403)
 
 /* teardown removes routes */

@@ -5,7 +5,7 @@
 import { mkdir, writeFile, rm, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { runExecute, activeInstall } from './runner-v4.js'
+import { runExecute, activeInstall } from './runner-v5.js'
 
 const scratch = join(process.cwd(), '_selftest-run')
 const backupDir = join(process.cwd(), '_selftest-backup')

@@ -5,7 +5,7 @@
  */
 import { mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { parseTarget, insertedIds, registeredSlotKeys, peerCheck, runAudit, readRuntimeVersion, resolveDshEngines } from './audit-v3.js'
+import { parseTarget, insertedIds, registeredSlotKeys, peerCheck, runAudit, readRuntimeVersion, resolveDshEngines, slotKeysFromCatalogText, slotCatalogCandidates } from './audit-v4.js'
 import { buildProposals, blockingChecks } from './proposals.js'
 
 let failures = 0
@@ -54,6 +54,21 @@ const clientSample = `
   ctx.slots.register({ name: 'sidebar.panellist' }, D)
 `
 expect('slot keys', [...registeredSlotKeys(clientSample)].sort(), ['settings.section', 'sidebar.panellist'])
+
+/* slotKeysFromCatalogText: source (single quotes) and packaged (double quotes) catalogs */
+expect('catalog source quoting', [...slotKeysFromCatalogText("  key: 'settings.section',\n  key: 'conversation.chat.node',")].sort(),
+  ['conversation.chat.node', 'settings.section'])
+expect('catalog packaged quoting', [...slotKeysFromCatalogText('{ key: "settings.plugins.tab", kind: "list" },\n{ key: "shell.overlay", kind: "list" }')].sort(),
+  ['settings.plugins.tab', 'shell.overlay'])
+expect('catalog skips non-dotted keys', [...slotKeysFromCatalogText('key: "slots", key: \'locale\', key: "settings.section"')], ['settings.section'])
+expect('catalog tolerates junk', [...slotKeysFromCatalogText(undefined)].length, 0)
+
+/* slotCatalogCandidates: explicit config first, then packaged runtime next to the anchor, source tree last */
+const packagedCtx = { profileContext: { dir: 'C:\\p', installAnchor: 'D:\\app\\resources\\app.asar\\dsh\\node_modules\\@deepseek-ai\\dsh\\package.json' } }
+const candidates = slotCatalogCandidates({}, packagedCtx)
+const packagedHit = candidates.findIndex(p => p.includes('dsh-cordis-client-runner') && p.includes('lib')) 
+expect('candidates put the packaged catalog first', packagedHit >= 0 && packagedHit < candidates.findIndex(p => p.endsWith('slot-catalog.ts')), true)
+expect('explicit slotCatalogPath wins', slotCatalogCandidates({ slotCatalogPath: 'X:\\pin\\slot-catalog.ts' }, packagedCtx)[0], 'X:\\pin\\slot-catalog.ts')
 
 /* peerCheck (host mirror) */
 expect('peer ok', peerCheck({ peerDependencies: { '@deepseek-ai/dsh-client-locale': '^0.1.0-rc.7' } }, '0.1.7-rc.2', {}).status, 'ok')

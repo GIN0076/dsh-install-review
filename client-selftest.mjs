@@ -3,11 +3,12 @@
  * a fake slot system, evaluate the panel in idle / report / blocking states,
  * drive its audit and execute buttons end to end, then walk the catalog tab
  * (browse → one-click send-to-audit). A second module instance bound to the
- * real React is server-rendered for a browser-quality pass.
+ * real React is server-rendered for a browser-quality pass — that pass is
+ * SKIPped when this machine has no react / react-dom package (the packaged
+ * Desktop app does not ship them; see `selftest-host.mjs`), instead of dying on
+ * the old hardcoded `E:/DSH-OneClick/src/node_modules/.pnpm/…` import.
  */
-const REACT_URL = 'file:///E:/DSH-OneClick/src/node_modules/.pnpm/react@18.3.1/node_modules/react/index.js'
-const REACT_DOM_SERVER_URL = 'file:///E:/DSH-OneClick/src/node_modules/.pnpm/react-dom@18.3.1_react@18.3.1/node_modules/react-dom/server.node.js'
-const { renderToStaticMarkup } = await import(REACT_DOM_SERVER_URL)
+import { importHostModule } from './selftest-host.mjs'
 
 /* --- minimal React with scriptable state ---------------------------------- */
 let current = []
@@ -503,18 +504,25 @@ expect('row audit switched tab', current[I.tab], 'audit')
 expect('row audit filled target', current[I.target], 'dshmarket')
 expect('row audit produced report', current[I.report]?.manifest?.name, 'dsh-find-plugin')
 
-/* 7 · browser-quality server render bound to the real React */
-const realReact = (await import(REACT_URL)).default
-const realRegistrations = []
-const realModule = captured.factory((name) => {
-  if (name === 'react') return realReact
-  throw new Error(`unexpected require: ${name}`)
-})
-realModule.apply(fakeContext(realRegistrations, []))
-const markup = renderToStaticMarkup(realReact.createElement(realRegistrations[0].component, { close: () => {}, t: key => `T:${key}` }))
-expect('ssr renders the page', markup.includes('T:nav') || markup.includes('安装审查'), true)
-expect('ssr has the audit button', markup.includes('T:audit'), true)
-expect('ssr has the catalog tab', markup.includes('T:tabCatalog'), true)
+/* 7 · browser-quality server render bound to the real React (SKIP without it) */
+const real = await importHostModule('react', 'index.js', 'DSH_SELFTEST_REACT')
+const reactDom = await importHostModule('react-dom', 'server.node.js', 'DSH_SELFTEST_REACT_DOM')
+if (real === undefined || reactDom === undefined) {
+  console.log('SKIP ssr pass: 本机没有 react / react-dom 包（桌面版不打包这两个包；设 DSH_SELFTEST_REACT / DSH_SELFTEST_REACT_DOM 指向真实文件可恢复）')
+} else {
+  const realReact = real.module.default ?? real.module
+  const renderToStaticMarkup = reactDom.module.renderToStaticMarkup
+  const realRegistrations = []
+  const realModule = captured.factory((name) => {
+    if (name === 'react') return realReact
+    throw new Error(`unexpected require: ${name}`)
+  })
+  realModule.apply(fakeContext(realRegistrations, []))
+  const markup = renderToStaticMarkup(realReact.createElement(realRegistrations[0].component, { close: () => {}, t: key => `T:${key}` }))
+  expect('ssr renders the page', markup.includes('T:nav') || markup.includes('安装审查'), true)
+  expect('ssr has the audit button', markup.includes('T:audit'), true)
+  expect('ssr has the catalog tab', markup.includes('T:tabCatalog'), true)
+}
 
 console.log(failures === 0 ? 'ALL PASS' : `${failures} FAILURES`)
 if (failures > 0) process.exitCode = 1
